@@ -2,7 +2,7 @@
 
 A local [Model Context Protocol](https://modelcontextprotocol.io) server that turns your AI assistant into an expense tracker. Instead of opening an app, you just talk:
 
-> "Spent 450 on lunch at Subway, paid by UPI"
+> "Spent 450 on dinner at hotel, paid by UPI"
 > "Where did my money go this month?"
 > "Set a 5000 monthly budget for Food"
 
@@ -54,7 +54,43 @@ uv run --with fastmcp fastmcp dev main.py
 
 ### 3. Connect it to Claude Desktop
 
-Add this to your `claude_desktop_config.json`.
+#### Option A: one command (recommended)
+
+FastMCP can register the server in Claude Desktop for you. It writes the config entry **without running the server**, and it handles path escaping, so you can't hit the Windows backslash error.
+
+```bash
+uv run --with fastmcp fastmcp install claude-desktop main.py
+```
+
+Run it from the folder that contains `main.py`. If `fastmcp` is already installed in your environment, the shorter form works too:
+
+```bash
+fastmcp install claude-desktop main.py
+```
+
+Useful flags:
+
+```bash
+# Custom name shown in Claude Desktop
+fastmcp install claude-desktop main.py --server-name "Expense Tracker"
+
+# Pass environment variables (currency, data folder)
+fastmcp install claude-desktop main.py --env EXPENSE_CURRENCY=INR --env EXPENSE_TRACKER_DIR=D:/MyData/expenses
+
+# Load variables from a .env file
+fastmcp install claude-desktop main.py --env-file .env
+
+# Add extra Python dependencies
+fastmcp install claude-desktop main.py --with pandas
+```
+
+Then **fully quit Claude Desktop from the system tray and reopen it**. The server appears in the tools menu. Re-running the command updates the existing entry.
+
+The same command can target other clients. Run `fastmcp install --help` to see the clients your version supports (for example `claude-code`, `cursor`, or `mcp-json`, which prints the config so you can paste it anywhere).
+
+#### Option B: edit the config manually
+
+If you prefer full control, add this to your `claude_desktop_config.json`.
 
 ```json
 {
@@ -218,7 +254,7 @@ date,amount,category,merchant,description,payment_method,tags
 
 | Problem | Fix |
 |---|---|
-| `Invalid unicode sequence in string` | Double the backslashes in Windows paths in your JSON config |
+| `Invalid unicode sequence in string` | Double the backslashes in Windows paths in your JSON config, or skip hand-editing and use `fastmcp install claude-desktop main.py` |
 | Server not showing in Claude Desktop | Fully quit the app from the system tray and reopen it; check logs in `%APPDATA%\Claude\logs` |
 | `uv` not found | Use the full path from `where.exe uv` in `command` |
 | Garbled or failing connection | Never `print()` to stdout in this server; stdio is the protocol channel. Use `logging` (stderr). |
