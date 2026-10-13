@@ -862,6 +862,85 @@ def budget_status(month: Optional[str] = None) -> dict:
         return {"month": month, "currency": CURRENCY, "budgets": _budget_status(conn, month)}
 
 
+# ============================ RECURRING EXPENSES ============================ #
+@mcp.tool()
+def add_recurring_expense(
+    name: str,
+    amount: float,
+    category: str,
+    frequency: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    merchant: str = "",
+    description: str = "",
+    payment_method: str = "other",
+    tags: Optional[list[str]] = None,
+) -> dict:
+    """Define a recurring expense (rent, Netflix, SIP...). Expenses are generated
+    automatically when due (on server start or via process_recurring).
+
+    frequency: daily | weekly | biweekly | monthly | quarterly | yearly
+    start_date: first due date (default today). Past dates are back-filled.
+    """
+    if frequency not in FREQUENCIES:
+        raise ToolError(f"frequency must be one of {FREQUENCIES}")
+    start = parse_date(start_date)
+    end = parse_date(end_date, default_today=False)
+    if end and end < start:
+        raise ToolError("end_date cannot be before start_date.")
+    with db() as conn:
+        cat = ensure_category(conn, norm_category(category))
+        cur = conn.execute(
+            "INSERT INTO recurring(name, amount, category, merchant, description, payment_method, "
+            "tags, frequency, next_due, end_date, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (name.strip(), check_amount(amount), cat, merchant.strip(), description.strip(),
+             payment_method.strip().lower(), tags_to_db(tags), frequency, start, end, _now()))
+        rid = cur.lastrowid
+        created = run_recurring(conn, date.today().isoformat())
+    return {"message": "Recurring expense created", "recurring_id": rid, "first_due": start,
+            "expenses_generated_now": len([c for c in created if c["recurring_id"] == rid])}
+
+
+@mcp.tool()
+def list_recurring_expenses(include_inactive: bool = False) -> dict:
+    """List recurring expense definitions and when each is next due."""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM recurring" + ("" if include_inactive else " WHERE active = 1")
+            + " ORDER BY next_due").fetchall()
+    return {"currency": CURRENCY, "recurring": [
+        {**dict(r), "amount": r2(r["amount"]), "tags": tags_from_db(r["tags"]),
+         "active": bool(r["active"])} for r in rows]}
+
+
+@mcp.tool()
+def set_recurring_active(recurring_id: int, active: bool) -> dict:
+    """Pause (active=false) or resume (active=true) a recurring expense."""
+    with db() as conn:
+        cur = conn.execute("UPDATE recurring SET active = ? WHERE id = ?", (int(active), recurring_id))
+        if cur.rowcount == 0:
+            raise ToolError(f"Recurring expense {recurring_id} not found.")
+    return {"message": f"Recurring expense {recurring_id} {'resumed' if active else 'paused'}."}
+
+
+@mcp.tool()
+def delete_recurring_expense(recurring_id: int) -> dict:
+    """Delete a recurring definition. Already generated expenses are kept."""
+    with db() as conn:
+        cur = conn.execute("DELETE FROM recurring WHERE id = ?", (recurring_id,))
+        if cur.rowcount == 0:
+            raise ToolError(f"Recurring expense {recurring_id} not found.")
+    return {"message": f"Recurring expense {recurring_id} deleted (generated expenses kept)."}
+
+
+@mcp.tool()
+def process_recurring(as_of: Optional[str] = None) -> dict:
+    """Generate expenses for all recurring items due on or before `as_of` (default today)."""
+    with db() as conn:
+        created = run_recurring(conn, parse_date(as_of))
+    return {"created_count": len(created), "created": created}
+
+
 # ================================ CATEGORIES ================================ #
 @mcp.tool()
 def list_categories() -> dict:
